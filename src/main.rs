@@ -1,6 +1,6 @@
 use serial2::SerialPort;
 use std::env;
-use std::io::{self, Write};
+use std::io::{ Write};
 
 fn main() -> Result<(), ()> {
     println!("OS is {}", env::consts::OS); // Prints the current OS.

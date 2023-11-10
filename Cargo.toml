@@ -7,4 +7,3 @@ edition = "2021"
 
 [dependencies]
 serial2 = "0.2.8"
-serialport = "4.2.2"
