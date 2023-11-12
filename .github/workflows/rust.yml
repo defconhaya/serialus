@@ -54,3 +54,7 @@ jobs:
           name: static-artifact
       - name: Test artifact download
         run: ls -R 
+      - name: Archive content
+        uses: thedoctor0/zip-release@0.7.5
+        with:
+          filename: serialus.zip
