@@ -29,7 +29,7 @@ fn get_all_ports() -> Vec<String> {
     let mut all_ports = Vec::new();
     match serial2::SerialPort::available_ports() {
         Err(e) => {
-            eprintln!("Failed to enumerate serial ports: {}  ", e);
+            eprintln!("Failed to enumerate serial ports:  --> {}  ", e);
             std::process::exit(1);
         }
         Ok(ports) => {
