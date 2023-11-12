@@ -59,6 +59,8 @@ jobs:
       - name: Archive content
         uses: thedoctor0/zip-release@0.7.5
         with:
+          command: pwd
+          # command: ls -al
           filename: serialus.zip
       - uses: actions/checkout@v3
       - name: Create GitHub release
