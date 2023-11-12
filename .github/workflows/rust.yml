@@ -56,14 +56,14 @@ jobs:
           name: static-artifact
       - name: Test artifact download
         run: ls -R 
-        
+
       - name: Archive content
         uses: thedoctor0/zip-release@0.7.5
         with:
           command: ls -R  /home/runner/work/serialus/
           # command: ls -al
           filename: serialus.zip
-      - uses: actions/checkout@v3
+      # - uses: actions/checkout@v3
 
       - name: Check zip
         run: ls -R /home/runner/work/serialus/
