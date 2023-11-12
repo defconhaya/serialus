@@ -34,8 +34,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - name: Build
-      run: RUSTFLAGS='-C target-feature=+crt-static' cargo build --release --target x86_64-unknown-linux-gnu
+    - name: Build add musl
+      run: rustup target add x86_64-unknown-linux-musl
+    - name: Build compile
+      run: cargo build --target=x86_64-unknown-linux-musl
+
     - name: Run tests
       run: cargo test --verbose
     - name:  upload artifact
