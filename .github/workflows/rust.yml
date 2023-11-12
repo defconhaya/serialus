@@ -46,6 +46,8 @@ jobs:
   release:
     name: Release project
     runs-on: ubuntu-latest
+    permissions:
+      contents: write    
     needs: build
     steps:
       - name: Download artifact
