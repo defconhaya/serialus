@@ -45,6 +45,6 @@ fn get_all_ports() -> Vec<String> {
 
 fn open_port(port_name: String, baud: u32) -> Result<SerialPort, String> {
     let port = SerialPort::open(&port_name, baud)
-        .map_err(|e| format!("Error: Failed to open {}: {}", port_name, e))?;
+        .map_err(|e| format!("Error: Failed to open {}: {} ", port_name, e))?;
     Ok(port)
 }
