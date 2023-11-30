@@ -1,8 +1,8 @@
 use crossterm::cursor::MoveTo;
-use crossterm::event::{poll, read, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, poll, read, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{self, Clear, ClearType};
 use crossterm::QueueableCommand;
-use std::io::{stdout, Stdout, Write, Bytes};
+use std::io::{stdout, Bytes, Stdout, Write};
 use std::ops::{Mul, Sub};
 use std::thread;
 use std::time::Duration;
@@ -22,7 +22,9 @@ fn chat_window(stdout: &mut impl Write, chat: &[String], boundary: Rect) {
             .queue(MoveTo(boundary.x as u16, (boundary.y + row) as u16))
             .unwrap();
         let bytes = line.as_bytes();
-        stdout.write(bytes.get(0..boundary.w).unwrap_or(bytes)).unwrap();
+        stdout
+            .write(bytes.get(0..boundary.w).unwrap_or(bytes))
+            .unwrap();
     }
 }
 
@@ -48,18 +50,19 @@ fn main() {
                     h = nh;
                     bar = bar_char.repeat(w as usize);
                 }
-                Event::Paste(data) =>{
+                Event::Paste(data) => {
                     prompt.push_str(&data);
                 }
-                Event::Key(event) => match event.code {
-                    KeyCode::Char(x) => {
+
+                Event::Key(event) => match (event.kind, event.code) {
+                    (KeyEventKind::Release, KeyCode::Char(x)) => {
                         if x == 'c' && event.modifiers.contains(KeyModifiers::CONTROL) {
                             quit = true;
                         }
                         prompt.push(x)
                     }
-                    KeyCode::Esc => quit = true,
-                    KeyCode::Enter => {
+                    (KeyEventKind::Release, KeyCode::Esc) => quit = true,
+                    (KeyEventKind::Release, KeyCode::Enter) => {
                         chat.push(prompt.clone());
                         prompt.clear();
                     }
@@ -76,7 +79,7 @@ fn main() {
                 x: 0,
                 y: 0,
                 w: w as usize,
-                h: h as usize- 2,
+                h: h as usize - 2,
             },
         );
 
@@ -85,9 +88,10 @@ fn main() {
         stdout.queue(MoveTo(1, h - 1)).unwrap();
         {
             let bytes = prompt.as_bytes();
-            stdout.write(bytes.get(0..w as usize).unwrap_or(bytes)).unwrap();
-        }
-        stdout.write(prompt.as_bytes()).unwrap();
+            stdout
+                .write(bytes.get(0..w as usize).unwrap_or(bytes))
+                .unwrap();
+        }        
         stdout.flush();
         thread::sleep(Duration::from_millis(33));
         terminal::disable_raw_mode().unwrap();
