@@ -1,9 +1,10 @@
 use crossterm::cursor::MoveTo;
-use crossterm::event::{self, poll, read, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{poll, read, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{self, Clear, ClearType};
 use crossterm::QueueableCommand;
-use std::io::{stdout, Bytes, Stdout, Write};
-use std::ops::{Mul, Sub};
+use serial2::SerialPort;
+use std::io::{stdout, Write};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -14,12 +15,54 @@ struct Rect {
     h: usize,
 }
 
-fn chat_window(stdout: &mut impl Write, chat: &[String], boundary: Rect) {
+fn draw_window(stdout: &mut impl Write, boundary: &Rect) {
+    let bar_char = "═";
+    let corner_down_right = "╔";
+    let corner_down_left = "╗";
+    let corner_up_right = "╚";
+    let corner_up_left = "╝";
+    let vertical_right = "╠";
+    let vertical_left = "╣";
+    let upper_bar = format!(
+        "{}{}{}",
+        corner_down_right,
+        bar_char.repeat(boundary.w as usize - 2),
+        corner_down_left
+    );
+    let lower_bar = format!(
+        "{}{}{}",
+        corner_up_right,
+        bar_char.repeat(boundary.w as usize - 2),
+        corner_up_left
+    );
+    let middle_bar = format!(
+        "{}{}{}",
+        vertical_right,
+        bar_char.repeat(boundary.w as usize - 2),
+        vertical_left
+    );
+    stdout.queue(MoveTo(0, 0)).unwrap();
+    stdout.write(upper_bar.as_bytes()).unwrap();
+    stdout.queue(MoveTo(0, boundary.h as u16 - 1)).unwrap();
+    stdout.write(middle_bar.as_bytes()).unwrap();
+    stdout.queue(MoveTo(0, boundary.h as u16 + 1)).unwrap();
+    stdout.write(lower_bar.as_bytes()).unwrap();
+    for y in 1..boundary.h - 1 {
+        stdout.queue(MoveTo(0, y as u16)).unwrap();
+        stdout.write("║".as_bytes()).unwrap();
+        stdout.queue(MoveTo(boundary.w as u16, y as u16)).unwrap();
+        stdout.write("║".as_bytes()).unwrap();
+    }
+
+    // stdout.flush();
+}
+fn draw_chat_in_window(stdout: &mut impl Write, chat: &[String], boundary: Rect) {
     let n = chat.len();
-    let m = n.checked_sub(boundary.h as usize).unwrap_or(0);
+    let m = n.checked_sub(boundary.h as usize - 2).unwrap_or(0);
+    draw_window(stdout, &boundary);
     for (row, line) in chat.iter().skip(m).enumerate() {
         stdout
-            .queue(MoveTo(boundary.x as u16, (boundary.y + row) as u16))
+            .queue(MoveTo(boundary.x as u16 + 1, (boundary.y + row + 1) as u16))
             .unwrap();
         let bytes = line.as_bytes();
         stdout
@@ -28,119 +71,121 @@ fn chat_window(stdout: &mut impl Write, chat: &[String], boundary: Rect) {
     }
 }
 
-// use serial2::SerialPort;
-// use std::env;
-
-// fn chat_window(stdout: &mut impl QueueableCommand)
-
 fn main() {
-    let mut stdout = stdout();
     terminal::enable_raw_mode().unwrap();
-    let (mut w, mut h) = terminal::size().unwrap();
-    let bar_char = "─";
-    let mut bar = bar_char.repeat(w as usize);
-    let mut prompt = String::new();
-    let mut chat = Vec::new();
-    let mut quit = false;
-    while !quit {
-        while poll(Duration::ZERO).unwrap() {
-            match read().unwrap() {
-                Event::Resize(nw, nh) => {
-                    w = nw;
-                    h = nh;
-                    bar = bar_char.repeat(w as usize);
-                }
-                Event::Paste(data) => {
-                    prompt.push_str(&data);
-                }
+    let ( mut w,mut  h) = terminal::size().unwrap();
+    // let bar_char = "═";
+    // let mut prompt = String::new();
+    let prompt: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let keyboard_prompt_shared = Arc::clone(&prompt);
+    let gui_prompt_shared = Arc::clone(&prompt);
 
-                Event::Key(event) => match (event.kind, event.code) {
-                    (KeyEventKind::Release, KeyCode::Char(x)) => {
-                        if x == 'c' && event.modifiers.contains(KeyModifiers::CONTROL) {
-                            quit = true;
-                        }
-                        prompt.push(x)
-                    }
-                    (KeyEventKind::Release, KeyCode::Esc) => quit = true,
-                    (KeyEventKind::Release, KeyCode::Enter) => {
-                        chat.push(prompt.clone());
-                        prompt.clear();
-                    }
-                    _ => {}
-                },
-                _ => {}
+    let chat: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let serial_port_chat_shared = Arc::clone(&chat);
+    let keyboard_chat_shared = Arc::clone(&chat);
+    let gui_chat_shared = Arc::clone(&chat);
+
+    // let mut quit = false;
+    let quit: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+    let quit_keyboard = Arc::clone(&quit);
+    let quit_gui = Arc::clone(&quit);
+    let quit_serial = Arc::clone(&quit);
+
+    let serial_handle = std::thread::spawn(move || {
+        let port = SerialPort::open("COM13", 115200).unwrap();
+        let mut buffer = [0; 512];
+        while !*quit_serial.lock().unwrap() {
+            match port.read(&mut buffer) {
+                Ok(0) => {}
+                Ok(n) => {
+                    let mut chat = serial_port_chat_shared.lock().unwrap();
+                    let msg = String::from_utf8(buffer[..n].to_vec()).unwrap();
+                    chat.push(msg);
+                }
+                // Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => return,
+                Err(e) => {
+                    eprintln!("Error: Failed to read from port: {}", e);
+                    // return Err(());
+                }
             }
         }
-        stdout.queue(Clear(ClearType::All)).unwrap();
-        chat_window(
-            &mut stdout,
-            &chat,
-            Rect {
-                x: 0,
-                y: 0,
-                w: w as usize,
-                h: h as usize - 2,
-            },
-        );
+    });
 
-        stdout.queue(MoveTo(0, h - 2)).unwrap();
-        stdout.write(bar.as_bytes()).unwrap();
-        stdout.queue(MoveTo(1, h - 1)).unwrap();
-        {
+    let keyboard_handle = std::thread::spawn(move || {
+        while !*quit_keyboard.lock().unwrap() {
+            while poll(Duration::ZERO).unwrap() {
+                match read().unwrap() {
+                    Event::Resize(nw, nh) => {
+                        w = nw;
+                        h = nh;
+                    }
+                    Event::Paste(data) => {
+                        let mut prompt = keyboard_prompt_shared.lock().unwrap();
+                        prompt.push_str(&data);
+                    }
+
+                    Event::Key(event) => match (event.kind, event.code) {
+                        (KeyEventKind::Release, KeyCode::Char(x)) => {
+                            if x == 'c' && event.modifiers.contains(KeyModifiers::CONTROL) {
+                                *quit_keyboard.lock().unwrap() = true;
+                            }
+                            let mut prompt = keyboard_prompt_shared.lock().unwrap();
+                            prompt.push(x);
+                        }
+                        (KeyEventKind::Release, KeyCode::Esc) => {
+                            *quit_keyboard.lock().unwrap() = true
+                        }
+                        (KeyEventKind::Release, KeyCode::Enter) => {
+                            let mut chat = keyboard_chat_shared.lock().unwrap();
+                            chat.push(keyboard_prompt_shared.lock().unwrap().clone());
+                            keyboard_prompt_shared.lock().unwrap().clear();
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+
+            terminal::disable_raw_mode().unwrap();
+        }
+    });
+
+    let gui_handle = std::thread::spawn(move || {
+        while !*quit_gui.lock().unwrap() {
+            let mut stdout = stdout();
+            stdout.queue(Clear(ClearType::All)).unwrap();
+            draw_chat_in_window(
+                &mut stdout,
+                &gui_chat_shared.lock().unwrap(),
+                Rect {
+                    x: 0,
+                    y: 0,
+                    w: w as usize,
+                    h: h as usize - 2,
+                },
+            );
+
+            stdout.queue(MoveTo(0, h - 2)).unwrap();
+            stdout.write("║".as_bytes()).unwrap();
+            stdout.queue(MoveTo(w, h - 2)).unwrap();
+            stdout.write("║".as_bytes()).unwrap();
+            stdout.queue(MoveTo(2, h - 2)).unwrap();
+
+            let prompt = gui_prompt_shared.lock().unwrap();
             let bytes = prompt.as_bytes();
             stdout
                 .write(bytes.get(0..w as usize).unwrap_or(bytes))
                 .unwrap();
-        }        
-        stdout.flush();
-        thread::sleep(Duration::from_millis(33));
-        terminal::disable_raw_mode().unwrap();
-    }
-}
 
-// fn test_ser() -> Result<(), ()> {
-//     println!("OS is {}", env::consts::OS); // Prints the current OS.
-//     let result = get_all_ports();
-//     println!("{:?}", result);
-//     let port = open_port(String::from("COM13"), 115200).unwrap();
-//     let mut buffer = [0; 512];
-//     loop {
-//         match port.read(&mut buffer) {
-//             Ok(0) => return Ok(()),
-//             Ok(n) => {
-//                 std::io::stdout()
-//                     .write_all(&buffer[..n])
-//                     .map_err(|e| eprintln!("Error: Failed to write to stdout: {}", e))?;
-//             }
-//             Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
-//             Err(e) => {
-//                 eprintln!("Error: Failed to read from port: {}", e);
-//                 return Err(());
-//             }
-//         }
-//     }
-// }
+            stdout.queue(MoveTo(w, h - 2)).unwrap();
+            stdout.write("║".as_bytes()).unwrap();
+            stdout.flush().unwrap();
 
-fn get_all_ports() -> Vec<String> {
-    let mut all_ports = Vec::new();
-    match serial2::SerialPort::available_ports() {
-        Err(e) => {
-            eprintln!("Failed to enumerate serial ports:  --> {}  ", e);
-            std::process::exit(1);
+            thread::sleep(Duration::from_millis(33));
         }
-        Ok(ports) => {
-            eprintln!("Found {} ports", ports.len());
-            for port in ports {
-                all_ports.push(String::from(port.to_str().unwrap()));
-                // println!("{}", port.display())
-            }
-        }
-    }
-    all_ports
-}
+    });
 
-// fn open_port(port_name: String, baud: u32) -> Result<SerialPort, String> {
-//     let port = SerialPort::open(&port_name, baud)
-//         .map_err(|e| format!("Error: Failed to open {}: {} ", port_name, e))?;
-//     Ok(port)
-// }
+    serial_handle.join().unwrap();
+    keyboard_handle.join().unwrap();
+    gui_handle.join().unwrap();
+}
